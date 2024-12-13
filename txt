@@ -1,0 +1,116 @@
+# Guía de Comandos - Bot de Casetas México
+
+## Iniciar el Bot
+```bash
+# Iniciar el bot
+node src/index.js
+
+# Iniciar con nodemon (si está instalado)
+nodemon src/index.js
+```
+
+## Gestión de Datos (Excel/MongoDB)
+```bash
+# Exportar datos de MongoDB a Excel
+node utils/excelUtils.js export
+
+# Importar datos desde Excel a MongoDB
+node utils/excelUtils.js import data/casetas.xlsx
+```
+
+## Git - Control de Versiones
+```bash
+# Ver estado de cambios
+git status
+
+# Agregar todos los cambios
+git add .
+
+# Agregar archivo específico
+git add nombre-archivo
+
+# Crear commit
+git commit -m "Descripción del cambio"
+
+# Subir cambios a GitHub
+git push origin main
+
+# Obtener últimos cambios
+git pull origin main
+
+# Ver historial de commits
+git log
+```
+
+## NPM - Gestión de Dependencias
+```bash
+# Instalar dependencias
+npm install
+
+# Instalar nueva dependencia
+npm install nombre-paquete
+
+# Instalar dependencia de desarrollo
+npm install --save-dev nombre-paquete
+
+# Ver dependencias instaladas
+npm list
+```
+
+## MongoDB Compass
+```bash
+# URI de conexión MongoDB
+mongodb+srv://<usuario>:<contraseña>@cluster0.jbyof.mongodb.net/
+```
+
+## Estructura de Archivos
+```
+bot-casetas-mexico/
+├── data/           # Archivos Excel y respaldos
+├── utils/          # Scripts de utilidad
+├── src/           # Código fuente del bot
+└── .env           # Variables de entorno
+```
+
+## Variables de Entorno (.env)
+```
+MONGO_USER=tu_usuario
+MONGO_PASSWORD=tu_password
+TELEGRAM_BOT_TOKEN=tu_token
+```
+
+## Comandos del Bot en Telegram
+```
+/start - Iniciar el bot
+/route origen destino sentido - Calcular ruta
+Ejemplo: /route 19.4326,-99.1332 20.5937,-100.3924 N-S
+```
+
+## Respaldos y Mantenimiento
+```bash
+# Crear carpeta de respaldo
+mkdir -p backups
+
+# Copiar Excel a respaldo
+cp data/casetas.xlsx backups/casetas_$(date +%Y%m%d).xlsx
+
+# Limpiar archivos temporales
+rm -rf node_modules/.cache
+```
+
+## Solución de Problemas
+1. Si el bot no inicia:
+   - Verificar que MongoDB esté corriendo
+   - Verificar variables en .env
+   - Verificar conexión a internet
+
+2. Si la importación falla:
+   - Verificar formato del Excel
+   - Verificar conexión a MongoDB
+   - Verificar permisos de escritura
+
+## Notas Importantes
+- Siempre hacer respaldo antes de importar
+- Mantener Excel con formato correcto
+- Verificar datos antes de subir a producción
+- Mantener .env actualizado y seguro

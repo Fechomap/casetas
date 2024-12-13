@@ -103,22 +103,34 @@ tollBoothSchema.index({ sentido: 1 });
 
 // Método estático para buscar casetas cercanas
 tollBoothSchema.statics.findNearby = async function(longitude, latitude, maxDistance = 10000) {
-    try {
-        return await this.find({
-            ubicacion: {
-                $near: {
-                    $geometry: {
-                        type: 'Point',
-                        coordinates: [longitude, latitude]
-                    },
-                    $maxDistance: maxDistance
+    const maxRetries = 3;
+    const retryDelay = 1000; // 1 segundo
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            return await this.find({
+                ubicacion: {
+                    $near: {
+                        $geometry: {
+                            type: 'Point',
+                            coordinates: [longitude, latitude]
+                        },
+                        $maxDistance: maxDistance
+                    }
                 }
+            }).maxTimeMS(5000).exec();
+        } catch (error) {
+            console.error(`Intento ${attempt}/${maxRetries} fallido:`, error);
+            
+            if (attempt === maxRetries) {
+                console.error('Error al buscar casetas cercanas después de todos los reintentos');
+                return []; // En lugar de lanzar error, retornamos array vacío
             }
-        }).exec();
-    } catch (error) {
-        console.error('Error al buscar casetas cercanas:', error);
-        throw new Error('Error al buscar casetas cercanas');
+
+            await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
+        }
     }
+    return [];
 };
 
 // Método para formatear costos
