@@ -23,7 +23,7 @@ const routeService = new RouteService();
 // Función asíncrona para iniciar el bot
 const iniciarBot = async () => {
     try {
-        // Conectar a MongoDB con manejo de errores mejorado
+        // Conectar a MongoDB con manejo de errores
         await mongoose.connect(MONGO_URI, {
             serverSelectionTimeoutMS: 5000,
             socketTimeoutMS: 45000,
