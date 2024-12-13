@@ -1,6 +1,54 @@
-echo ".DS_Store
-node_modules
+# Dependencias
+node_modules/
+package-lock.json
+
+# Archivos de entorno
 .env
+.env.local
+.env.*.local
+
+# Logs
+logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Archivos del sistema
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Directorios IDE
+.idea/
 .vscode/
-.idea/" > .gitignore
+*.swp
+*.swo
+
+# Directorios de compilación
+dist/
+build/
+coverage/
+
+# Archivos temporales
+*.tmp
+*.temp
+
+# Archivos de respaldo
+*.bak
+*.backup
+
+# MongoDB
+*.mongodb
+mongodb.config
+
+# Archivos Excel temporales
+~$*.xlsx
+~$*.xls
+
+# Carpeta de caché
+.cache/
