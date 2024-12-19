@@ -102,13 +102,14 @@ tollBoothSchema.index({ 'carretera.nombre': 1 });
 tollBoothSchema.index({ sentido: 1 });
 
 // Método estático para buscar casetas cercanas
-tollBoothSchema.statics.findNearby = async function(longitude, latitude, maxDistance = 10000) {
+tollBoothSchema.statics.findNearby = async function(longitude, latitude, maxDistance = 2000) {
     const maxRetries = 3;
-    const retryDelay = 1000; // 1 segundo
+    const retryDelay = 1000;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            return await this.find({
+            console.log(`Buscando casetas cerca de [${longitude}, ${latitude}] con radio ${maxDistance}m`);
+            const casetas = await this.find({
                 ubicacion: {
                     $near: {
                         $geometry: {
@@ -119,12 +120,15 @@ tollBoothSchema.statics.findNearby = async function(longitude, latitude, maxDist
                     }
                 }
             }).maxTimeMS(5000).exec();
+            
+            console.log(`Encontradas ${casetas.length} casetas en el radio`);
+            return casetas;
         } catch (error) {
             console.error(`Intento ${attempt}/${maxRetries} fallido:`, error);
             
             if (attempt === maxRetries) {
                 console.error('Error al buscar casetas cercanas después de todos los reintentos');
-                return []; // En lugar de lanzar error, retornamos array vacío
+                return [];
             }
 
             await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));

@@ -1,4 +1,3 @@
-// src/services/enhancedRouteService.js
 const axios = require('axios');
 const mongoose = require('mongoose');
 const { decode } = require('@here/flexpolyline');
@@ -6,7 +5,7 @@ const pLimit = require('p-limit');
 const pRetry = require('p-retry');
 const NodeCache = require('node-cache');
 const TollBooth = require('../models/TollBooth');
-const EARTH_RADIUS = 6371000; // Radio de la Tierra en metros
+const EARTH_RADIUS = 6371000;
 
 class EnhancedRouteService {
     constructor() {
@@ -21,71 +20,35 @@ class EnhancedRouteService {
             useClones: false
         });
         
-        // Configuración de validación de ruta
         this.routeConfig = {
             shortRouteThreshold: 30,
-            initialSearchRadius: 1000,  // Cambiado de 5000 a 1000
-            maxSearchRadius: 3000,      // Cambiado de 10000 a 3000
-            minTollboothDistance: 500,  // Cambiado de 1000 a 500
-            routeBufferDistance: 500,   // Cambiado de 1000 a 500
-            sampleRateShort: 5,
-            sampleRateLong: 50
+            initialSearchRadius: 2000,
+            maxSearchRadius: 5000,
+            minTollboothDistance: 100,
+            routeBufferDistance: 1000,
+            sampleRateShort: 2,
+            sampleRateLong: 10,
+            mainRoadThreshold: 5, // Ahora sólo aceptamos casetas a menos de 5 metros
+            tollBoothSideThreshold: 25
         };
     }
 
-    calculateBearing(lat1, lon1, lat2, lon2) {
-        const toRad = n => n * Math.PI / 180;
-        const φ1 = toRad(lat1);
-        const φ2 = toRad(lat2);
-        const Δλ = toRad(lon2 - lon1);
+    haversineDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371e3;
+        const φ1 = lat1 * Math.PI / 180;
+        const φ2 = lat2 * Math.PI / 180;
+        const Δφ = (lat2 - lat1) * Math.PI / 180;
+        const Δλ = (lon2 - lon1) * Math.PI / 180;
 
-        const y = Math.sin(Δλ) * Math.cos(φ2);
-        const x = Math.cos(φ1) * Math.sin(φ2) -
-                 Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
-
-        return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-    }
-
-    // Añadir después del método calculateBearing y antes de validateSentido:
-
-    calculateRouteBearing(coordinates) {
-    if (coordinates.length < 2) return null;
-    
-    // Tomar varios puntos de la ruta para un cálculo más preciso
-    const numPoints = Math.min(5, coordinates.length);
-    const step = Math.floor(coordinates.length / numPoints);
-    let totalBearing = 0;
-    let count = 0;
-
-    for (let i = 0; i < coordinates.length - step; i += step) {
-        const [lon1, lat1] = coordinates[i];
-        const [lon2, lat2] = coordinates[i + step];
-        totalBearing += this.calculateBearing(lat1, lon1, lat2, lon2);
-        count++;
-    }
-
-    const avgBearing = totalBearing / count;
-    console.log(`Bearing promedio de la ruta: ${avgBearing.toFixed(1)}°`);
-    return avgBearing;
-    }
-
-    validateSentido(bearing, sentido) {
-        const sentidoRanges = {
-            'N-S': [[157.5, 202.5]],  
-            'S-N': [[337.5, 360], [0, 22.5]],  
-            'E-O': [[247.5, 292.5]],  
-            'O-E': [[67.5, 112.5]]    
-        };
-    
-        const ranges = sentidoRanges[sentido];
-        if (!ranges) return false;
+        const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                 Math.cos(φ1) * Math.cos(φ2) *
+                 Math.sin(Δλ/2) * Math.sin(Δλ/2);
         
-        return ranges.some(([min, max]) => {
-            if (min > max) {
-                return bearing >= min || bearing <= max;
-            }
-            return bearing >= min && bearing <= max;
-        });
+        return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    formatCoordinates(coord) {
+        return `[${coord[0].toFixed(6)}, ${coord[1].toFixed(6)}]`;
     }
 
     calculatePerpendicularDistance(point, lineStart, lineEnd) {
@@ -120,114 +83,102 @@ class EnhancedRouteService {
         const dx = x - xx;
         const dy = y - yy;
         
-        return Math.sqrt(dx * dx + dy * dy) * 111000; // Convertir a metros
+        return {
+            distance: Math.sqrt(dx * dx + dy * dy) * 111000
+        };
     }
 
-    async findOptimalSearchRadius(lon, lat) {
-        let radius = this.routeConfig.initialSearchRadius;
-        let casetas = [];
+    sampleCoordinates(coordinates, routeDistance) {
+        const sampleRate = routeDistance < this.routeConfig.shortRouteThreshold ? 
+            this.routeConfig.sampleRateShort : 
+            this.routeConfig.sampleRateLong;
+
+        const sampledCoordinates = [];
+        for (let i = 0; i < coordinates.length; i += sampleRate) {
+            sampledCoordinates.push(coordinates[i]);
+        }
         
-        while (radius <= this.routeConfig.maxSearchRadius) {
-            casetas = await TollBooth.findNearby(lon, lat, radius);
-            if (casetas.length >= 2) break;
-            radius += 2500;
+        if (sampledCoordinates[sampledCoordinates.length - 1] !== coordinates[coordinates.length - 1]) {
+            sampledCoordinates.push(coordinates[coordinates.length - 1]);
         }
 
-        return radius;
+        return sampledCoordinates;
     }
 
-    haversineDistance(lat1, lon1, lat2, lon2) {
-        const R = 6371e3; // Radio de la Tierra en metros
-        const φ1 = lat1 * Math.PI / 180;
-        const φ2 = lat2 * Math.PI / 180;
-        const Δφ = (lat2 - lat1) * Math.PI / 180;
-        const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-        const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-                 Math.cos(φ1) * Math.cos(φ2) *
-                 Math.sin(Δλ/2) * Math.sin(Δλ/2);
-        
-        return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    ordenarYFiltrarCasetas(uniqueCasetas) {
+        return Array.from(uniqueCasetas.values())
+            .sort((a, b) => a.distanceOnRoute - b.distanceOnRoute)
+            .filter((caseta, index, array) => {
+                if (index === 0) return true;
+                const prevCaseta = array[index - 1];
+                return this.haversineDistance(
+                    caseta.ubicacion.coordinates[1],
+                    caseta.ubicacion.coordinates[0],
+                    prevCaseta.ubicacion.coordinates[1],
+                    prevCaseta.ubicacion.coordinates[0]
+                ) >= this.routeConfig.minTollboothDistance;
+            });
     }
 
     async findTollboothsInRoute(coordinates) {
         const startTime = Date.now();
         try {
             const uniqueCasetas = new Map();
-            const routeBearing = this.calculateRouteBearing(coordinates);
-            console.log(`Bearing calculado de la ruta: ${routeBearing.toFixed(1)}°`);
-
-            // Calcular distancia total de la ruta
             const routeDistance = this.calculateDistanceAlongRoute(coordinates) / 1000;
             console.log(`Distancia de ruta: ${routeDistance.toFixed(2)} km`);
 
-            // Ajustar tasa de muestreo basado en la distancia
-            const sampleRate = routeDistance < this.routeConfig.shortRouteThreshold ? 
-                this.routeConfig.sampleRateShort : 
-                this.routeConfig.sampleRateLong;
-
-            // Optimizar puntos de muestreo
-            const sampledCoordinates = [];
-            for (let i = 0; i < coordinates.length; i += sampleRate) {
-                sampledCoordinates.push(coordinates[i]);
-            }
-            // Asegurar que incluimos el último punto
-            if (sampledCoordinates[sampledCoordinates.length - 1] !== coordinates[coordinates.length - 1]) {
-                sampledCoordinates.push(coordinates[coordinates.length - 1]);
-            }
-
+            const sampledCoordinates = this.sampleCoordinates(coordinates, routeDistance);
             console.log(`Puntos de muestreo: ${sampledCoordinates.length}`);
 
-            // Dividir en chunks para procesar por lotes
-            const chunkSize = 10;
-            for (let i = 0; i < sampledCoordinates.length; i += chunkSize) {
-                const chunk = sampledCoordinates.slice(i, i + chunkSize);
+            for (let i = 0; i < sampledCoordinates.length; i += 10) {
+                const chunk = sampledCoordinates.slice(i, i + 10);
                 
                 await Promise.all(chunk.map(([lon, lat]) => 
                     this.limit(async () => {
                         try {
-                            const casetas = await TollBooth.findNearby(
-                                lon, 
-                                lat, 
-                                this.routeConfig.initialSearchRadius
-                            );
+                            const casetas = await TollBooth.findNearby(lon, lat, this.routeConfig.initialSearchRadius);
+                            console.log(`Buscando cerca de [${lon}, ${lat}], encontradas: ${casetas.length} casetas`);
                 
                             for (const caseta of casetas) {
                                 if (!uniqueCasetas.has(caseta._id.toString())) {
                                     const casetaPoint = caseta.ubicacion.coordinates;
                                     let minDistance = Infinity;
-                                    
-                                    // Calcular la distancia mínima a cualquier segmento de la ruta
-                                    for (let i = 0; i < coordinates.length - 1; i++) {
-                                        const distance = this.calculatePerpendicularDistance(
+                                    let validSegment = null;
+
+                                    // Determinamos el segmento más cercano a la caseta
+                                    for (let j = 0; j < coordinates.length - 1; j++) {
+                                        const segment = [coordinates[j], coordinates[j + 1]];
+                                        const result = this.calculatePerpendicularDistance(
                                             casetaPoint,
-                                            coordinates[i],
-                                            coordinates[i + 1]
+                                            segment[0],
+                                            segment[1]
                                         );
-                                        minDistance = Math.min(minDistance, distance);
+                                        
+                                        if (result.distance < minDistance) {
+                                            minDistance = result.distance;
+                                            validSegment = segment;
+                                        }
                                     }
-                
-                                    // Validar bearing y distancia
-                                    const bearing = this.calculateBearing(
-                                        lat,
-                                        lon,
-                                        casetaPoint[1],
-                                        casetaPoint[0]
-                                    );
-                
-                                    if (minDistance <= 200) { // 200 metros de tolerancia
-                                        console.log(`Caseta ${caseta.nombre}:`);
-                                        console.log(`- Distancia perpendicular: ${minDistance.toFixed(2)}m`);
-                                        console.log(`- Bearing: ${bearing.toFixed(1)}°`);
-                                        console.log(`- Sentido esperado: ${caseta.sentido}`);
-                                        console.log(`- Sentido válido: ${this.validateSentido(bearing, caseta.sentido)}`);
-                
+                                    
+                                    console.log(`\nAnálisis detallado de caseta ${caseta.nombre}:`);
+                                    console.log(`- Coordenadas caseta: [${casetaPoint}]`);
+                                    console.log(`- Distancia mínima: ${minDistance.toFixed(2)}m`);
+                                    
+                                    // Se acepta la caseta sólo si está a menos o igual de 5m (mainRoadThreshold)
+                                    const withinDistance = minDistance <= this.routeConfig.mainRoadThreshold;
+
+                                    console.log(`- Aceptada por distancia: ${withinDistance ? 'Sí' : 'No'}`);
+
+                                    if (withinDistance) {
+                                        console.log('✅ Caseta dentro del umbral de distancia');
                                         uniqueCasetas.set(caseta._id.toString(), {
                                             ...caseta.toObject(),
                                             distanceOnRoute: this.calculateDistanceAlongRoute(
-                                                coordinates.slice(0, coordinates.indexOf([lon, lat]) + 1)
+                                                coordinates.slice(0, coordinates.indexOf(validSegment[0]) + 1)
                                             )
                                         });
+                                    } else {
+                                        console.log(`❌ Caseta ignorada: distancia fuera del umbral de 5m`);
                                     }
                                 }
                             }
@@ -238,32 +189,12 @@ class EnhancedRouteService {
                     })
                 ));
 
-                // Agregar pequeña pausa entre chunks para evitar sobrecarga
                 await new Promise(resolve => setTimeout(resolve, 100));
             }
 
-            const timeElapsed = Date.now() - startTime;
-            console.log(`Búsqueda completada en: ${timeElapsed}ms`);
-
-            // Ordenar y filtrar resultados
-            const casetasOrdenadas = Array.from(uniqueCasetas.values())
-                .sort((a, b) => a.distanceOnRoute - b.distanceOnRoute)
-                .filter((caseta, index, array) => {
-                    if (index === 0) return true;
-                    const prevCaseta = array[index - 1];
-                    return this.haversineDistance(
-                        caseta.ubicacion.coordinates[1],
-                        caseta.ubicacion.coordinates[0],
-                        prevCaseta.ubicacion.coordinates[1],
-                        prevCaseta.ubicacion.coordinates[0]
-                    ) >= this.routeConfig.minTollboothDistance;
-                });
-
-                
+            const casetasOrdenadas = this.ordenarYFiltrarCasetas(uniqueCasetas);
             console.log(`Casetas encontradas y filtradas: ${casetasOrdenadas.length}`);
             return casetasOrdenadas;
-
-            
 
         } catch (error) {
             console.error('Error en findTollboothsInRoute:', error);
@@ -322,7 +253,6 @@ class EnhancedRouteService {
         }
     }
 
-    // Métodos heredados del servicio original
     async getHereRoute(originLat, originLon, destLat, destLon) {
         try {
             const url = 'https://router.hereapi.com/v8/routes';
@@ -337,7 +267,7 @@ class EnhancedRouteService {
                         alternatives: 0,
                         units: 'metric'
                     },
-                    timeout: 30000  // Reducido a 30 segundos
+                    timeout: 30000
                 }),
                 {
                     retries: 3,
