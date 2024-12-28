@@ -114,7 +114,7 @@ tollBoothSchema.statics.findNearby = async function(longitude, latitude, maxDist
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            console.log(`Buscando casetas cerca de [${longitude}, ${latitude}] con radio ${maxDistance}m`);
+            // Solo mantener un log con información útil
             const casetas = await this.find({
                 ubicacion: {
                     $near: {
@@ -127,16 +127,12 @@ tollBoothSchema.statics.findNearby = async function(longitude, latitude, maxDist
                 }
             }).maxTimeMS(5000).exec();
             
-            console.log(`Encontradas ${casetas.length} casetas en el radio`);
             return casetas;
         } catch (error) {
-            console.error(`Intento ${attempt}/${maxRetries} fallido:`, error);
-            
             if (attempt === maxRetries) {
-                console.error('Error al buscar casetas cercanas después de todos los reintentos');
+                console.error('Error al buscar casetas cercanas después de todos los reintentos:', error);
                 return [];
             }
-
             await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
         }
     }

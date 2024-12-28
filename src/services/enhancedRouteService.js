@@ -122,15 +122,13 @@ class EnhancedRouteService {
     }
 
     async findTollboothsInRoute(coordinates) {
-        const startTime = Date.now();
         try {
             const uniqueCasetas = new Map();
+            const evaluatedCasetas = [];  // Cambiamos a array para mejor ordenamiento
             const routeDistance = this.calculateDistanceAlongRoute(coordinates) / 1000;
-            console.log(`Distancia de ruta: ${routeDistance.toFixed(2)} km`);
-
             const sampledCoordinates = this.sampleCoordinates(coordinates, routeDistance);
-            console.log(`Puntos de muestreo: ${sampledCoordinates.length}`);
-
+            const processedIds = new Set();  // Para control de duplicados
+    
             for (let i = 0; i < sampledCoordinates.length; i += 10) {
                 const chunk = sampledCoordinates.slice(i, i + 10);
                 
@@ -138,14 +136,15 @@ class EnhancedRouteService {
                     this.limit(async () => {
                         try {
                             const casetas = await TollBooth.findNearby(lon, lat, this.routeConfig.initialSearchRadius);
-                            console.log(`Buscando cerca de [${lon}, ${lat}], encontradas: ${casetas.length} casetas`);
                 
                             for (const caseta of casetas) {
-                                if (!uniqueCasetas.has(caseta._id.toString())) {
+                                const casetaId = caseta._id.toString();
+                                if (!processedIds.has(casetaId)) {
+                                    processedIds.add(casetaId);
                                     const casetaPoint = caseta.ubicacion.coordinates;
                                     let minDistance = Infinity;
                                     let validSegment = null;
-
+    
                                     for (let j = 0; j < coordinates.length - 1; j++) {
                                         const segment = [coordinates[j], coordinates[j + 1]];
                                         const result = this.calculatePerpendicularDistance(
@@ -160,44 +159,81 @@ class EnhancedRouteService {
                                         }
                                     }
                                     
-                                    console.log(`\nAnálisis detallado de caseta ${caseta.nombre}:`);
-                                    console.log(`- Coordenadas caseta: ${caseta.coordenadas}`);
-                                    console.log(`- Distancia mínima: ${minDistance.toFixed(2)}m`);
-                                    
                                     const withinDistance = minDistance <= this.routeConfig.mainRoadThreshold;
-                                    console.log(`- Aceptada por distancia: ${withinDistance ? 'Sí' : 'No'}`);
-
+    
+                                    // Almacenar datos de evaluación
+                                    evaluatedCasetas.push({
+                                        id: casetaId,
+                                        name: caseta.nombre,
+                                        distance: minDistance,
+                                        accepted: withinDistance,
+                                        caseta: caseta,
+                                        validSegment: validSegment
+                                    });
+    
                                     if (withinDistance) {
-                                        console.log('✅ Caseta dentro del umbral de distancia');
-                                        uniqueCasetas.set(caseta._id.toString(), {
+                                        uniqueCasetas.set(casetaId, {
                                             ...caseta.toObject(),
                                             distanceOnRoute: this.calculateDistanceAlongRoute(
                                                 coordinates.slice(0, coordinates.indexOf(validSegment[0]) + 1)
                                             )
                                         });
-                                    } else {
-                                        console.log(`❌ Caseta ignorada: distancia fuera del umbral de 5m`);
                                     }
                                 }
                             }
                         } catch (error) {
-                            console.error('Error en findTollboothsInRoute:', error);
-                            return [];
+                            console.error('Error en procesamiento de casetas:', error);
                         }
                     })
                 ));
-
-                await new Promise(resolve => setTimeout(resolve, 100));
             }
-
-            const casetasOrdenadas = this.ordenarYFiltrarCasetas(uniqueCasetas);
-            console.log(`Casetas encontradas y filtradas: ${casetasOrdenadas.length}`);
-            return casetasOrdenadas;
-
+    
+            // Ordenar casetas por distancia y estado (aceptadas primero)
+            evaluatedCasetas.sort((a, b) => {
+                if (a.accepted && !b.accepted) return -1;
+                if (!a.accepted && b.accepted) return 1;
+                return a.distance - b.distance;
+            });
+    
+            // Imprimir resultados ordenados
+            evaluatedCasetas.forEach(evaluation => {
+                const status = evaluation.accepted ? '✅' : '❌';
+                console.log(`${status} Caseta "${evaluation.name}" - ${evaluation.distance.toFixed(2)}m`);
+            });
+    
+            // Resumen analítico
+            console.log('\n📊 RESUMEN ANALÍTICO DE CASETAS');
+            console.log('==============================');
+            console.log(`Total evaluadas: ${evaluatedCasetas.length}`);
+            console.log(`Aceptadas: ${evaluatedCasetas.filter(e => e.accepted).length}`);
+            console.log(`Rechazadas: ${evaluatedCasetas.filter(e => !e.accepted).length}`);
+            
+            return Array.from(uniqueCasetas.values());
+    
         } catch (error) {
             console.error('Error en findTollboothsInRoute:', error);
             return [];
         }
+    }
+    
+    // Agregar este nuevo método a la clase
+    generateAnalyticsSummary(evaluatedCasetas) {
+        // Ordenar casetas por distancia
+        const sortedCasetas = [...evaluatedCasetas].sort((a, b) => a.distance - b.distance);
+        
+        console.log('\n📊 RESUMEN ANALÍTICO DE CASETAS');
+        console.log('==============================');
+        console.log(`Total evaluadas: ${sortedCasetas.length}`);
+        console.log(`Aceptadas: ${sortedCasetas.filter(c => c.accepted).length}`);
+        console.log(`Rechazadas: ${sortedCasetas.filter(c => !c.accepted).length}`);
+        console.log('\n📍 EVALUACIÓN DETALLADA (ordenada por distancia)');
+        console.log('----------------------------------------');
+        
+        sortedCasetas.forEach(caseta => {
+            const status = caseta.accepted ? '✅' : '❌';
+            console.log(`${status} ${caseta.name} - ${caseta.distance.toFixed(2)}m`);
+        });
+        console.log('----------------------------------------\n');
     }
 
     calculateDistanceAlongRoute(coordinates) {
@@ -216,13 +252,10 @@ class EnhancedRouteService {
         const cachedResult = this.cache.get(cacheKey);
         
         if (cachedResult) {
-            console.log('Retornando resultado desde cache');
             return cachedResult;
         }
 
-        try {
-            console.log(`Calculando ruta: ${originLat},${originLon} -> ${destLat},${destLon}`);
-            
+        try {            
             const routeResponse = await this.getHereRoute(originLat, originLon, destLat, destLon);
             if (!routeResponse || !routeResponse.route) {
                 throw new Error('No se pudo obtener la ruta desde HERE Maps');
@@ -233,7 +266,6 @@ class EnhancedRouteService {
             const coordinates = decoded.polyline.map(([lat, lon]) => [lon, lat]);
 
             const casetas = await this.findTollboothsInRoute(coordinates);
-            console.log(`Casetas encontradas: ${casetas.length}`);
 
             const result = {
                 distancia: routeResponse.distance,
@@ -278,7 +310,6 @@ class EnhancedRouteService {
                     minTimeout: 1000,
                     maxTimeout: 5000,
                     onFailedAttempt: error => {
-                        console.log(`Intento fallido al obtener ruta. Reintentando... Error: ${error.message}`);
                     }
                 }
             );
@@ -309,4 +340,8 @@ class EnhancedRouteService {
     }
 }
 
+
+
+
 module.exports = EnhancedRouteService;
+
