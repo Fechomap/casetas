@@ -109,16 +109,29 @@ const iniciarBot = async () => {
                 const text = ctx.message.text;
                 const parts = text.trim().split(/\s+/);
         
-                if (parts.length !== 3) {
+                if (parts.length < 3 || parts.length > 4) {
                     return ctx.reply(
                         '❓ Formato incorrecto.\n\n' +
-                        'Uso correcto: /route origen destino\n' +
-                        'Ejemplo: /route 19.4789,-99.1325 20.5881,-100.3889\n\n' +
+                        'Uso correcto: /route origen destino [tipo]\n' +
+                        'Ejemplo: /route 19.4789,-99.1325 20.5881,-100.3889 auto\n\n' +
+                        'Tipos de vehículo disponibles:\n' +
+                        '🚗 auto (predeterminado)\n' +
+                        '🚛 camion\n' +
+                        '🚌 autobus\n\n' +
                         'Para más ayuda, usa /help'
                     );
                 }
         
-                const [_, origen, destino] = parts;
+                const [_, origen, destino, tipoVehiculo = 'auto'] = parts;
+        
+                // Validar tipo de vehículo
+                if (tipoVehiculo && !['auto', 'camion', 'autobus'].includes(tipoVehiculo.toLowerCase())) {
+                    return ctx.reply(
+                        '❌ Tipo de vehículo no válido.\n' +
+                        'Tipos disponibles: auto, camion, autobus\n' +
+                        'Si no especificas, se usa "auto" por defecto.'
+                    );
+                }
         
                 if (!validateCoordinates(origen) || !validateCoordinates(destino)) {
                     return ctx.reply(
@@ -133,27 +146,66 @@ const iniciarBot = async () => {
         
                 const processingMsg = await ctx.reply('🔄 Calculando ruta y costos...');
         
-                const result = await routeService.calculateRoute(originLat, originLon, destLat, destLon);
-                
+                const result = await routeService.calculateRoute(originLat, originLon, destLat, destLon, tipoVehiculo);
+        
+                // Obtener el emoji correspondiente al tipo de vehículo
+                const vehicleEmoji = {
+                    auto: '🚗',
+                    camion: '🚛',
+                    autobus: '🚌'
+                }[tipoVehiculo.toLowerCase()];
+        
                 // Construcción del mensaje de respuesta
-                let message = `🛣 Ruta calculada:\n\n`;
+                let message = `🛣 Ruta calculada para ${vehicleEmoji} ${tipoVehiculo}:\n\n`;
                 message += `📍 Origen: ${origen}\n`;
                 message += `🏁 Destino: ${destino}\n`;
                 message += `📏 Distancia: ${result.distancia.toFixed(1)} km\n`;
                 message += `⏱ Tiempo estimado: ${result.tiempo} min\n`;
                 message += `💰 Costo total: $${result.costoTotal.toFixed(2)} MXN\n\n`;
-
+        
                 if (result.casetas.length > 0) {
                     message += '🚧 Casetas en la ruta:\n\n';
-                    message += result.casetas.map(formatTollboothMessage).join('\n\n');
+                    message += result.casetas.map(caseta => 
+                        `- ${caseta.nombre}\n` +
+                        `  📍 ${caseta.carretera.tramo}\n` +
+                        `  📍 Coordenadas: ${caseta.coordenadas}\n` +
+                        `  💰 Costo: $${caseta.costo[tipoVehiculo.toLowerCase()]}\n` +
+                        `  🌐 Ver en Maps: https://www.google.com/maps?q=${caseta.coordenadas}`
+                    ).join('\n\n');
                 } else {
                     message += '✨ No se encontraron casetas en la ruta.';
                 }
-
-                // Eliminar mensaje de procesamiento y enviar resultado
+        
                 await ctx.telegram.deleteMessage(ctx.chat.id, processingMsg.message_id);
                 await ctx.reply(message);
-
+        
+                // Logs de sistema
+                console.log('\n📊 DATOS DE LA RUTA CALCULADA');
+                console.log('============================');
+                console.log(`Tipo de vehículo: ${tipoVehiculo}`);
+                console.log(`Origen: ${origen}`);
+                console.log(`Destino: ${destino}`);
+                console.log(`Distancia: ${result.distancia.toFixed(1)} km`);
+                console.log(`Tiempo: ${result.tiempo} min`);
+                console.log(`Costo Total: $${result.costoTotal.toFixed(2)} MXN`);
+        
+                if (result.casetas.length > 0) {
+                    console.log('\n🚧 CASETAS DETECTADAS');
+                    console.log('===================');
+                    result.casetas.forEach((caseta, index) => {
+                        console.log(`\nCaseta ${index + 1}: ${caseta.nombre}`);
+                        console.log(`Tramo: ${caseta.carretera.tramo}`);
+                        console.log(`Coordenadas: ${caseta.coordenadas}`);
+                        console.log(`Costo ${tipoVehiculo}: $${caseta.costo[tipoVehiculo.toLowerCase()]}`);
+                    });
+                }
+        
+                console.log('\n📝 RESUMEN');
+                console.log('=========');
+                console.log(`Total casetas: ${result.casetas.length}`);
+                console.log(`Costo total: $${result.costoTotal} MXN`);
+                console.log(`Distancia promedio entre casetas: ${(result.distancia / (result.casetas.length || 1)).toFixed(1)} km`);
+        
             } catch (error) {
                 console.error('Error en comando route:', error);
                 await ctx.reply(

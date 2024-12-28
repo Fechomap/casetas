@@ -247,26 +247,29 @@ class EnhancedRouteService {
         return distance;
     }
 
-    async calculateRoute(originLat, originLon, destLat, destLon) {
-        const cacheKey = `route_${originLat}_${originLon}_${destLat}_${destLon}`;
+    async calculateRoute(originLat, originLon, destLat, destLon, vehicleType = 'auto') {
+        const cacheKey = `route_${originLat}_${originLon}_${destLat}_${destLon}_${vehicleType}`;
         const cachedResult = this.cache.get(cacheKey);
         
         if (cachedResult) {
             return cachedResult;
         }
-
+    
         try {            
             const routeResponse = await this.getHereRoute(originLat, originLon, destLat, destLon);
             if (!routeResponse || !routeResponse.route) {
                 throw new Error('No se pudo obtener la ruta desde HERE Maps');
             }
-
+    
             const encodedPolyline = routeResponse.route.sections[0].polyline;
             const decoded = decode(encodedPolyline);
             const coordinates = decoded.polyline.map(([lat, lon]) => [lon, lat]);
-
+    
             const casetas = await this.findTollboothsInRoute(coordinates);
-
+    
+            // Calcular costo total con el tipo de vehículo específico
+            const costoTotal = this.calculateTotalCost(casetas, vehicleType);
+    
             const result = {
                 distancia: routeResponse.distance,
                 tiempo: routeResponse.duration,
@@ -277,12 +280,13 @@ class EnhancedRouteService {
                         caseta.ubicacion.coordinates[0]
                     )
                 })),
-                costoTotal: this.calculateTotalCost(casetas)
+                costoTotal: costoTotal,
+                vehicleType: vehicleType
             };
-
+    
             this.cache.set(cacheKey, result);
             return result;
-
+    
         } catch (error) {
             console.error('Error en calculateRoute:', error);
             throw new Error(`Error al calcular la ruta: ${error.message}`);
@@ -333,9 +337,16 @@ class EnhancedRouteService {
 
     calculateTotalCost(casetas, vehicleType = 'auto') {
         return casetas.reduce((total, caseta) => {
-            const costo = caseta.costo && caseta.costo[vehicleType] ? 
-                         caseta.costo[vehicleType] : 0;
-            return total + costo;
+            // Aseguramos que estamos usando el tipo de vehículo correcto
+            const costoVehiculo = caseta.costo[vehicleType.toLowerCase()];
+            
+            // Validación y logging del cálculo
+            console.log(`\nCálculo de costo para ${caseta.nombre}:`);
+            console.log(`Tipo de vehículo: ${vehicleType}`);
+            console.log(`Costo individual: $${costoVehiculo}`);
+            
+            // Suma al total
+            return total + (costoVehiculo || 0);
         }, 0);
     }
 }
