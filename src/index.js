@@ -1,4 +1,3 @@
-// src/index.js
 require('dotenv').config();
 const { Telegraf } = require('telegraf');
 const mongoose = require('mongoose');
@@ -33,6 +32,7 @@ const validateCoordinates = (coord) => {
 const formatTollboothMessage = (caseta) => {
     return `- ${caseta.nombre}\n` +
            `  📍 ${caseta.carretera.tramo}\n` +
+           `  📍 Coordenadas: ${caseta.coordenadas}\n` +
            `  💵 Auto: $${caseta.costo.auto}\n` +
            `  🚛 Camión: $${caseta.costo.camion}\n` +
            `  🚌 Autobús: $${caseta.costo.autobus}\n` +
@@ -76,8 +76,8 @@ const iniciarBot = async () => {
                     '¡Bienvenido al Bot de Casetas! 🛣\n\n' +
                     'Este bot te ayuda a calcular los costos de casetas en tu ruta.\n\n' +
                     'Usa el comando /route seguido de:\n' +
-                    '1️⃣ Coordenadas de origen (lat,lon)\n' +
-                    '2️⃣ Coordenadas de destino (lat,lon)\n\n' +
+                    '1️⃣ Coordenadas de origen (latitud,longitud)\n' +
+                    '2️⃣ Coordenadas de destino (latitud,longitud)\n\n' +
                     'Ejemplo:\n' +
                     '/route 19.4789,-99.1325 20.5881,-100.3889\n\n' +
                     'Usa /help para más información.'
@@ -103,19 +103,18 @@ const iniciarBot = async () => {
             );
         });
 
-        // Comando route con validaciones mejoradas
+        // Comando route
         bot.command('route', async (ctx) => {
             try {
                 const text = ctx.message.text;
                 const parts = text.trim().split(/\s+/);
         
                 if (parts.length !== 3) {
-                    ctx.reply(
-                        '❓ Comando no reconocido.\n\n' +
-                        'Para calcular una ruta, usa el comando /route.\n' +
-                        'Para ver la ayuda, usa /help\n\n' +
-                        'Ejemplo:\n' +
-                        '/route 19.4789,-99.1325 20.5881,-100.3889'
+                    return ctx.reply(
+                        '❓ Formato incorrecto.\n\n' +
+                        'Uso correcto: /route origen destino\n' +
+                        'Ejemplo: /route 19.4789,-99.1325 20.5881,-100.3889\n\n' +
+                        'Para más ayuda, usa /help'
                     );
                 }
         
@@ -172,7 +171,7 @@ const iniciarBot = async () => {
                 'Para calcular una ruta, usa el comando /route.\n' +
                 'Para ver la ayuda, usa /help\n\n' +
                 'Ejemplo:\n' +
-                '/route 19.4789,-99.1325 20.5881,-100.3889 N-S'
+                '/route 19.4789,-99.1325 20.5881,-100.3889'
             );
         });
 

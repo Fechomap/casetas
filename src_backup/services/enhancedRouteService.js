@@ -28,8 +28,7 @@ class EnhancedRouteService {
             routeBufferDistance: 1000,
             sampleRateShort: 2,
             sampleRateLong: 10,
-            mainRoadThreshold: 5, // Ahora sólo aceptamos casetas a menos de 5 metros
-            tollBoothSideThreshold: 25
+            mainRoadThreshold: 5
         };
     }
 
@@ -47,8 +46,8 @@ class EnhancedRouteService {
         return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
 
-    formatCoordinates(coord) {
-        return `[${coord[0].toFixed(6)}, ${coord[1].toFixed(6)}]`;
+    formatCoordinates(lat, lon) {
+        return `${lat.toFixed(6)},${lon.toFixed(6)}`;
     }
 
     calculatePerpendicularDistance(point, lineStart, lineEnd) {
@@ -110,12 +109,14 @@ class EnhancedRouteService {
             .sort((a, b) => a.distanceOnRoute - b.distanceOnRoute)
             .filter((caseta, index, array) => {
                 if (index === 0) return true;
+                
                 const prevCaseta = array[index - 1];
+                const [prevLat, prevLon] = prevCaseta.coordenadas.split(',').map(Number);
+                const [currLat, currLon] = caseta.coordenadas.split(',').map(Number);
+                
                 return this.haversineDistance(
-                    caseta.ubicacion.coordinates[1],
-                    caseta.ubicacion.coordinates[0],
-                    prevCaseta.ubicacion.coordinates[1],
-                    prevCaseta.ubicacion.coordinates[0]
+                    prevLat, prevLon,
+                    currLat, currLon
                 ) >= this.routeConfig.minTollboothDistance;
             });
     }
@@ -145,7 +146,6 @@ class EnhancedRouteService {
                                     let minDistance = Infinity;
                                     let validSegment = null;
 
-                                    // Determinamos el segmento más cercano a la caseta
                                     for (let j = 0; j < coordinates.length - 1; j++) {
                                         const segment = [coordinates[j], coordinates[j + 1]];
                                         const result = this.calculatePerpendicularDistance(
@@ -161,12 +161,10 @@ class EnhancedRouteService {
                                     }
                                     
                                     console.log(`\nAnálisis detallado de caseta ${caseta.nombre}:`);
-                                    console.log(`- Coordenadas caseta: [${casetaPoint}]`);
+                                    console.log(`- Coordenadas caseta: ${caseta.coordenadas}`);
                                     console.log(`- Distancia mínima: ${minDistance.toFixed(2)}m`);
                                     
-                                    // Se acepta la caseta sólo si está a menos o igual de 5m (mainRoadThreshold)
                                     const withinDistance = minDistance <= this.routeConfig.mainRoadThreshold;
-
                                     console.log(`- Aceptada por distancia: ${withinDistance ? 'Sí' : 'No'}`);
 
                                     if (withinDistance) {
@@ -240,7 +238,13 @@ class EnhancedRouteService {
             const result = {
                 distancia: routeResponse.distance,
                 tiempo: routeResponse.duration,
-                casetas: casetas,
+                casetas: casetas.map(caseta => ({
+                    ...caseta,
+                    coordenadas: caseta.coordenadas || this.formatCoordinates(
+                        caseta.ubicacion.coordinates[1],
+                        caseta.ubicacion.coordinates[0]
+                    )
+                })),
                 costoTotal: this.calculateTotalCost(casetas)
             };
 

@@ -1,4 +1,3 @@
-// src/models/TollBooth.js
 const mongoose = require('mongoose');
 
 const tollBoothSchema = new mongoose.Schema({
@@ -8,6 +7,21 @@ const tollBoothSchema = new mongoose.Schema({
         trim: true,
         maxlength: [100, 'El nombre no puede exceder los 100 caracteres']
     },
+    coordenadas: {
+        type: String,
+        required: [true, 'Las coordenadas son requeridas'],
+        validate: {
+            validator: function(value) {
+                // Validar formato "latitud,longitud"
+                const pattern = /^-?\d+\.?\d*,-?\d+\.?\d*$/;
+                if (!pattern.test(value)) return false;
+                
+                const [lat, lon] = value.split(',').map(Number);
+                return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+            },
+            message: 'Formato de coordenadas inválido. Debe ser "latitud,longitud" con valores válidos'
+        }
+    },
     ubicacion: {
         type: {
             type: String,
@@ -16,20 +30,9 @@ const tollBoothSchema = new mongoose.Schema({
             required: true
         },
         coordinates: {
-            type: [Number], // [longitud, latitud].
-            required: [true, 'Las coordenadas son requeridas'],
-            validate: {
-                validator: function(coordinates) {
-                    // Validar que sean exactamente 2 coordenadas
-                    if (!Array.isArray(coordinates) || coordinates.length !== 2) {
-                        return false;
-                    }
-                    // Validar rango de coordenadas
-                    const [lon, lat] = coordinates;
-                    return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
-                },
-                message: 'Coordenadas inválidas. Debe ser [longitud, latitud] con valores válidos'
-            }
+            type: [Number],
+            required: true,
+            index: '2dsphere'
         }
     },
     costo: {
@@ -74,17 +77,9 @@ const tollBoothSchema = new mongoose.Schema({
             trim: true,
             maxlength: [200, 'El tramo no puede exceder los 200 caracteres']
         }
-    },
-    sentido: {
-        type: String,
-        enum: {
-            values: ['N-S', 'S-N', 'E-O', 'O-E'],
-            message: '{VALUE} no es un sentido válido'
-        },
-        required: [true, 'El sentido es requerido']
     }
 }, {
-    timestamps: true, // Agrega createdAt y updatedAt
+    timestamps: true,
     toJSON: { 
         virtuals: true,
         transform: function(doc, ret) {
@@ -99,7 +94,18 @@ tollBoothSchema.index({ ubicacion: '2dsphere' });
 
 // Índices adicionales para mejora de rendimiento
 tollBoothSchema.index({ 'carretera.nombre': 1 });
-tollBoothSchema.index({ sentido: 1 });
+
+// Middleware para mantener sincronizados coordenadas y ubicacion
+tollBoothSchema.pre('save', function(next) {
+    if (this.coordenadas) {
+        const [lat, lon] = this.coordenadas.split(',').map(Number);
+        this.ubicacion = {
+            type: 'Point',
+            coordinates: [lon, lat] // MongoDB usa [longitud, latitud]
+        };
+    }
+    next();
+});
 
 // Método estático para buscar casetas cercanas
 tollBoothSchema.statics.findNearby = async function(longitude, latitude, maxDistance = 2000) {
@@ -137,30 +143,13 @@ tollBoothSchema.statics.findNearby = async function(longitude, latitude, maxDist
     return [];
 };
 
-// Método para formatear costos
-tollBoothSchema.methods.formatCostos = function() {
-    return {
-        auto: `$${this.costo.auto.toFixed(2)}`,
-        camion: `$${this.costo.camion.toFixed(2)}`,
-        autobus: `$${this.costo.autobus.toFixed(2)}`
-    };
-};
-
-// Middleware pre-save para validación adicional
-tollBoothSchema.pre('save', function(next) {
-    // Asegurar que las coordenadas estén en el orden correcto [longitud, latitud]
-    if (this.ubicacion.coordinates[1] < -90 || this.ubicacion.coordinates[1] > 90) {
-        next(new Error('La latitud debe estar entre -90 y 90 grados'));
-    } else if (this.ubicacion.coordinates[0] < -180 || this.ubicacion.coordinates[0] > 180) {
-        next(new Error('La longitud debe estar entre -180 y 180 grados'));
-    }
-    next();
-});
-
 // Virtual para obtener URL de Google Maps
 tollBoothSchema.virtual('googleMapsUrl').get(function() {
-    const [lon, lat] = this.ubicacion.coordinates;
-    return `https://www.google.com/maps?q=${lat},${lon}`;
+    if (this.coordenadas) {
+        const [lat, lon] = this.coordenadas.split(',');
+        return `https://www.google.com/maps?q=${lat},${lon}`;
+    }
+    return null;
 });
 
 const TollBooth = mongoose.model('TollBooth', tollBoothSchema);
