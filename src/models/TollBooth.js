@@ -16,7 +16,7 @@ const tollBoothSchema = new mongoose.Schema({
             required: true
         },
         coordinates: {
-            type: [Number], // [longitud, latitud]
+            type: [Number], // [longitud, latitud].
             required: [true, 'Las coordenadas son requeridas'],
             validate: {
                 validator: function(coordinates) {
